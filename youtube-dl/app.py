@@ -1,6 +1,8 @@
 from flask import Flask, request, send_file, render_template_string
 import yt_dlp
 import os
+import uuid
+import shutil
 
 app = Flask(__name__)
 DOWNLOAD_DIR = '/downloads'
@@ -43,9 +45,15 @@ HTML = '''<!DOCTYPE html>
             });
             if (response.ok) {
                 const blob = await response.blob();
+                const disposition = response.headers.get("Content-Disposition");
+                let filename = "audio.mp3";
+                if (disposition) {
+                    const match = disposition.match(/filename="(.+)"/);
+                    if (match) filename = match[1];
+                }
                 const a = document.createElement("a");
                 a.href = URL.createObjectURL(blob);
-                a.download = "audio.mp3";
+                a.download = filename;
                 a.click();
                 status.className = "success";
                 status.innerHTML = "Download complete!";
@@ -81,10 +89,16 @@ def download():
     url = data.get("url")
     if not url:
         return {"error": "No URL provided"}, 400
+    
+    # Create unique temp folder for this download
+    session_id = str(uuid.uuid4())
+    session_dir = f"{DOWNLOAD_DIR}/{session_id}"
+    os.makedirs(session_dir, exist_ok=True)
+    
     try:
         ydl_opts = {
             "format": "bestaudio/best",
-            "outtmpl": f"{DOWNLOAD_DIR}/%(title)s.%(ext)s",
+            "outtmpl": f"{session_dir}/%(title)s.%(ext)s",
             "noplaylist": True,
             "writethumbnail": True,
             "postprocessors": [
@@ -105,21 +119,33 @@ def download():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             if info is None:
+                shutil.rmtree(session_dir, ignore_errors=True)
                 return {"error": "Could not extract video info"}, 400
             if "entries" in info:
                 info = info["entries"][0]
             title = info.get("title", "audio")
-            title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
-            filename = f"{title}.mp3"
-            filepath = f"{DOWNLOAD_DIR}/{filename}"
-            if not os.path.exists(filepath):
-                files = sorted([f for f in os.listdir(DOWNLOAD_DIR) if f.endswith(".mp3")])
-                if files:
-                    filepath = f"{DOWNLOAD_DIR}/{files[-1]}"
-                    filename = files[-1]
-        resp = send_file(filepath, as_attachment=True, download_name=filename)
-        return resp
+            clean_title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+            
+            # Find the mp3 in the session folder
+            files = [f for f in os.listdir(session_dir) if f.endswith(".mp3")]
+            if not files:
+                shutil.rmtree(session_dir, ignore_errors=True)
+                return {"error": "MP3 file not found after conversion"}, 500
+            
+            filepath = f"{session_dir}/{files[0]}"
+            filename = f"{clean_title}.mp3"
+            
+        response = send_file(filepath, as_attachment=True, download_name=filename)
+        
+        # Cleanup session folder after sending
+        @response.call_on_close
+        def cleanup():
+            shutil.rmtree(session_dir, ignore_errors=True)
+        
+        return response
+        
     except Exception as e:
+        shutil.rmtree(session_dir, ignore_errors=True)
         return {"error": str(e)}, 500
 
 if __name__ == "__main__":
