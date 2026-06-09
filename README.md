@@ -35,7 +35,6 @@ Accessible from any device via Tailscale VPN. No ports exposed to the internet.
 - [ ] Image to STL pipeline for 3D printing
 - [ ] LoRA fine tuning
 - [ ] Agent capabilities
-- [ ] Raspberry Pi NAS
 
 ## Setup
 See individual service directories for configuration details.
