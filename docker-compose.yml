@@ -41,5 +41,14 @@ services:
       - open-webui-data:/app/backend/data
     restart: unless-stopped
 
+  youtube-mp3:
+    image: youtube-mp3
+    container_name: youtube-mp3
+    ports:
+      - "5001:5000"
+    volumes:
+      - /mnt/ai-storage/mp3s:/downloads
+    restart: unless-stopped
+
 volumes:
   open-webui-data:
